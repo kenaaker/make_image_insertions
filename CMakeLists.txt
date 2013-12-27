@@ -1,4 +1,4 @@
-project(png_make_insertions)
+project(make_image_insertions)
 cmake_minimum_required(VERSION 2.8)
 SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wall -DMAGICKCORE_HDRI_ENABLE=0 -DMAGICKCORE_QUANTUM_DEPTH=16")
 aux_source_directory(. SRC_LIST)

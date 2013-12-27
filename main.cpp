@@ -16,7 +16,7 @@ static void make_insertions_version_info() {
             " using libpng " << png_libpng_ver << "." << endl;
     cout << "   Compiled with zlib " << ZLIB_VERSION <<
             " using zlib " << zlib_version << "." << endl;
-} /* png_make_insertions_version_info */
+} /* make_insertions_version_info */
 
 static void usage(void) {
     make_insertions_version_info();
