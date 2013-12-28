@@ -11,6 +11,24 @@
 using namespace std;
 using namespace Magick;
 
+struct _geom_angle {
+    Geometry geom;              /* geometry location WxH+x+y */
+    double rotation_degrees;    /* rotation of insertion image before insert */
+    bool operator<(const _geom_angle& rhs) const {
+        if (geom < rhs.geom) {
+            return true;
+        } else if (geom > rhs.geom) {
+            return false;
+        } else {
+            return (rotation_degrees < rhs.rotation_degrees);
+        } /* endif */
+    } /* operator< */
+    bool operator==(const _geom_angle& rhs) const {
+        return ((geom == rhs.geom) &&
+                (rotation_degrees == rhs.rotation_degrees));
+    } /* operator== */
+};
+
 static void make_insertions_version_info() {
     cout << "   Compiled with libpng " << PNG_LIBPNG_VER_STRING <<
             " using libpng " << png_libpng_ver << "." << endl;
@@ -20,15 +38,27 @@ static void make_insertions_version_info() {
 
 static void usage(void) {
     make_insertions_version_info();
-    cout << " Usage is make_insertions input_file output_file -w geometry_spec -w geometry_spec ..." << endl;
+    cout << " Usage is make_insertions -w geometry_spec -w geometry_spec... "
+            "insert_image_file target_image_file output_image_file" << endl;
 } /* usage */
 
 /* Put insertions into target image. inserts is assumed sorted and unique */
 static int process_image(Image &out_img, Image &insert_img, Image &target_img,
-                        list<string> inserts) {
+                        list<struct _geom_angle> inserts) {
     int rc =-1;
     out_img = target_img;
-
+    cout << "Starting to process image" << endl;
+    out_img = target_img;
+    list<struct _geom_angle>::iterator ci;
+    for (ci=inserts.begin(); ci!=inserts.end(); ++ci) {
+        /* Take the current insert geometry item, size the logo image and insert it into the target */
+        Image inset = insert_img;
+        inset.resize(ci->geom);
+        inset.rotate(ci->rotation_degrees);
+        out_img.composite(inset,ci->geom,OverCompositeOp);
+        rc = 0;
+    } /* endfor */
+    cout << "Finished processing image" << endl;
     return rc;
 } /* process_image */
 
@@ -43,7 +73,9 @@ static list<string> get_png_insertion_texts(png_struct *read_png,
     list<string> png_inserts;
     text_chunks = png_get_text(read_png, read_png_info, &text, &num_text);
     for (int i=0; i<text_chunks; ++i) {
-        png_inserts.push_back(text[i].text);
+        if (text[i].key == string("insert_loc")) {
+            png_inserts.push_back(text[i].text);
+        } /* endif */
     } /* endfor */
     return png_inserts;
 } /* get_png_insertion_texts */
@@ -93,6 +125,9 @@ static int display_infile_inserts(string in_file) { /* Just for png files now */
                         png_init_io(png, fp);
                         png_read_png(png, png_info, PNG_TRANSFORM_IDENTITY, png_voidp_NULL);
                         list<string> infile_insertions = get_png_insertion_texts(png, png_info);
+                        for (list<string>::iterator it=infile_insertions.begin(); it!=infile_insertions.end(); ++it) {
+                            cout << " insert location = \"" << *it << "\"" << endl;
+                        } /* endfor */
                         png_destroy_info_struct(png, &end_info);
                     } /* endif */
                     png_destroy_info_struct(png, &png_info);
@@ -105,18 +140,12 @@ static int display_infile_inserts(string in_file) { /* Just for png files now */
     return rc;
 } /* process_png_inserts */
 
-
 /* This program takes 3 filename arguments and multiple -w insertion spec strings */
 /* Positional arguments are inserted_image_file, target_image_file, output_image_file */
 int main(int argc, char* argv[]) {
-    struct _geom_angle {
-        Geometry geom;              /* geometry location WxH+x+y */
-        double rotation_degrees;    /* rotation of insertion image before insert */
-    };
 
     int rc = 0;
     int opt = 0;
-    list<string> insert_list;
     list<struct _geom_angle> insert_geoms;
     enum process_options {display_insertions, do_insertions, do_nothing};
     enum process_options p_opt = do_nothing;
@@ -128,6 +157,7 @@ int main(int argc, char* argv[]) {
     Image output_img;
 
     static struct option long_options[] = {
+        { "display-insert-locs", required_argument, 0, 'd'},
         { "insert-spec", required_argument, 0, 'w'},
         { "insert-img", required_argument, 0, 'i'},
         { "target-img", required_argument, 0, 't'},
@@ -136,14 +166,19 @@ int main(int argc, char* argv[]) {
     }; /* long_options */
     int option_index = 1;
 
+    InitializeMagick(*argv);
+
     rc = 0;
     while ((rc == 0) &&
-           (opt = getopt_long(argc, argv, "w:i:t:o:", long_options, &option_index)) != -1) {
-        list<string>::iterator ci;
+           (opt = getopt_long(argc, argv, "dw:i:t:o:", long_options, &option_index)) != -1) {
+        list<struct _geom_angle>::iterator ci;
         switch(opt) {
+            case 'd':
+                p_opt= display_insertions;
+                break;
             case 'w': {
                 /* add the option to the list of insertion points */
-                /* split the string at the optional '/' to isolate the geom and rotation */
+                /* split the string at the optional '/' to isolate the geometry and rotation */
                 string cmd_ins_loc = string(optarg);
                 string rotate_delim = "/";
                 int delim_pos = cmd_ins_loc.find(rotate_delim);
@@ -158,16 +193,18 @@ int main(int argc, char* argv[]) {
                     cout << " Error is " << error_.what() << endl;
                     rc = -EINVAL;
                 } /* catch */
-                struct _geom_angle new_insert_spec = { ins_geom, rotate_angle };
-#ifdef foo
-                ci = find(insert_list.begin(), insert_list.end(), new_insert_spec);
-                if (ci != insert_list.end()) {
+                struct _geom_angle const new_insert_spec = { ins_geom, rotate_angle };
+                ci = find(insert_geoms.begin(), insert_geoms.end(), new_insert_spec);
+
+                if (ci != insert_geoms.end()) {
                     cout << " This insert item \"" << geom_str << "/" << rotate_str << "\" is a duplicate, check your list of -w arguments.." << endl;
                     p_opt = do_nothing;
                     exit(-EINVAL);
+                } else {
+                    insert_geoms.push_back(new_insert_spec);
                 }
-#endif
-                insert_list.push_back(string(optarg));
+
+                insert_geoms.push_back(new_insert_spec);
                 p_opt = do_insertions;
                 }
                 break;
@@ -185,30 +222,41 @@ int main(int argc, char* argv[]) {
                 return -1;
         } /* endswitch */
     } /* endwhile */
-    insert_list.sort();
-    insert_list.unique();
-
-    insert_img_filename = argv[optind];
-    target_img_filename = argv[optind+1];
-    output_img_filename = argv[optind+2];
-    try {
-        insert_img.read(insert_img_filename);
-    } catch(Exception &error_) {
-        cout << "Error trying to read input image named \"" << insert_img_filename << "\"" << endl;
-        cout << "Error is " << error_.what() << endl;
-    }
-
-    try {
-        target_img.read(target_img_filename);
-    } catch(Exception &error_) {
-        cout << "Error trying to read target image named \"" << target_img_filename << "\"" << endl;
-        cout << "Error is " << error_.what() << endl;
-    }
+    insert_geoms.sort();
+    insert_geoms.unique();
 
     if (((argc-optind) == 3) && (p_opt == do_insertions)) {
-        rc =process_image(output_img, insert_img, target_img, insert_list);
+        rc = 0;
+        insert_img_filename = argv[optind];
+        target_img_filename = argv[optind+1];
+        output_img_filename = argv[optind+2];
+        try {
+            insert_img.read(insert_img_filename);
+        } catch(Magick::WarningCoder &warning_) {
+            cout << "Exception is " << warning_.what() << endl;
+        } catch(Exception &error_) {
+            cout << "Error is " << error_.what() << endl;
+            rc = -EIO;
+        } /* try catch */
+
+        if (rc == 0) {
+            try {
+                target_img.read(target_img_filename);
+            } catch(Magick::WarningCoder &warning_) {
+                cout << "Warning is " << warning_.what() << endl;
+            } catch(Exception &error_) {
+                cout << "Exception is " << error_.what() << endl;
+                rc = -EIO;
+            } /* try catch */
+        } /* endif */
+        if (rc == 0) {
+            rc = process_image(output_img, insert_img, target_img, insert_geoms);
+            if (rc == 0) {
+                output_img.write(output_img_filename);
+            } /* endif */
+        } /* endif */
     } else {
-        if (((argc-optind) == 0) && (p_opt == display_insertions)) {
+        if (((argc-optind) == 1) && (p_opt == display_insertions)) {
             rc = display_infile_inserts(argv[optind]);
         } else {
             usage();
