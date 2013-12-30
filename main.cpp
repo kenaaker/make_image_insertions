@@ -1,5 +1,4 @@
 #include <iostream>
-#include <Magick++.h>
 #include <png.h>
 #include <zlib.h>
 #include <errno.h>
@@ -7,6 +6,8 @@
 #include <list>
 #include <regex.h>
 #include <algorithm>
+#include <sstream>
+#include <Magick++.h>
 
 using namespace std;
 using namespace Magick;
@@ -53,8 +54,22 @@ static int process_image(Image &out_img, Image &insert_img, Image &target_img,
     for (ci=inserts.begin(); ci!=inserts.end(); ++ci) {
         /* Take the current insert geometry item, size the logo image and insert it into the target */
         Image inset = insert_img;
-        inset.resize(ci->geom);
+        inset.zoom(ci->geom);
+        /* Calculate the center of the insert area and the center of the inserted image */
+        /* Align the two centers */
+        int inset_img_width = inset.columns();
+        int inset_img_height = inset.rows();
+        int geom_width = ci->geom.width();
+        int geom_height = ci->geom.height();
+        int center_x_offset = geom_width/2 - inset_img_width/2;
+        int center_y_offset = geom_height/2 - inset_img_height/2;
+        ci->geom.xOff(ci->geom.xOff() + center_x_offset);
+        ci->geom.yOff(ci->geom.yOff() + center_y_offset);
+        inset.backgroundColor(insert_img.backgroundColor());
+        inset.transparent(insert_img.backgroundColor());
         inset.rotate(ci->rotation_degrees);
+        inset.backgroundColor(insert_img.backgroundColor());
+        inset.transparent(inset.backgroundColor());
         out_img.composite(inset,ci->geom,OverCompositeOp);
         rc = 0;
     } /* endfor */
@@ -140,6 +155,14 @@ static int display_infile_inserts(string in_file) { /* Just for png files now */
     return rc;
 } /* process_png_inserts */
 
+static inline int string_to_int(string s)
+{
+    stringstream ss(s);
+    int x;
+    ss >> x;
+    return x;
+}
+
 /* This program takes 3 filename arguments and multiple -w insertion spec strings */
 /* Positional arguments are inserted_image_file, target_image_file, output_image_file */
 int main(int argc, char* argv[]) {
@@ -180,12 +203,20 @@ int main(int argc, char* argv[]) {
                 /* add the option to the list of insertion points */
                 /* split the string at the optional '/' to isolate the geometry and rotation */
                 string cmd_ins_loc = string(optarg);
+                string geom_str;
+                string rotate_str;
                 string rotate_delim = "/";
                 int delim_pos = cmd_ins_loc.find(rotate_delim);
-                string geom_str = cmd_ins_loc.substr(0,delim_pos);
-                string rotate_str = cmd_ins_loc.erase(0,delim_pos+rotate_delim.length());
-                Geometry ins_geom;
                 double rotate_angle = 0;
+
+                if (delim_pos > 0) {
+                    geom_str = cmd_ins_loc.substr(0,delim_pos);
+                    rotate_str = cmd_ins_loc.erase(0,delim_pos+rotate_delim.length());
+                    rotate_angle = string_to_int(rotate_str);
+                } else {
+                    geom_str = cmd_ins_loc;
+                } /* endif */
+                Geometry ins_geom;
                 try {
                     ins_geom = Geometry(geom_str);
                 } catch (Exception &error_){
@@ -233,7 +264,8 @@ int main(int argc, char* argv[]) {
         try {
             insert_img.read(insert_img_filename);
         } catch(Magick::WarningCoder &warning_) {
-            cout << "Exception is " << warning_.what() << endl;
+            cout << "Warning is " << warning_.what() << endl;
+            insert_img.colorSpace(sRGBColorspace);
         } catch(Exception &error_) {
             cout << "Error is " << error_.what() << endl;
             rc = -EIO;
@@ -244,6 +276,7 @@ int main(int argc, char* argv[]) {
                 target_img.read(target_img_filename);
             } catch(Magick::WarningCoder &warning_) {
                 cout << "Warning is " << warning_.what() << endl;
+                target_img.colorSpace(sRGBColorspace);
             } catch(Exception &error_) {
                 cout << "Exception is " << error_.what() << endl;
                 rc = -EIO;
@@ -252,7 +285,14 @@ int main(int argc, char* argv[]) {
         if (rc == 0) {
             rc = process_image(output_img, insert_img, target_img, insert_geoms);
             if (rc == 0) {
-                output_img.write(output_img_filename);
+                try {
+                    output_img.write(output_img_filename);
+                } catch(Magick::WarningCoder &warning_) {
+                    cout << "Output Warning is " << warning_.what() << endl;
+                } catch(Exception &error_) {
+                    cout << "Output Exception is " << error_.what() << endl;
+                    rc = -EIO;
+                } /* try catch */
             } /* endif */
         } /* endif */
     } else {
