@@ -54,6 +54,8 @@ static int process_image(Image &out_img, Image &insert_img, Image &target_img,
     for (ci=inserts.begin(); ci!=inserts.end(); ++ci) {
         /* Take the current insert geometry item, size the logo image and insert it into the target */
         Image inset = insert_img;
+        inset.backgroundColor(insert_img.backgroundColor());
+        inset.rotate(ci->rotation_degrees);
         inset.zoom(ci->geom);
         /* Calculate the center of the insert area and the center of the inserted image */
         /* Align the two centers */
@@ -65,11 +67,7 @@ static int process_image(Image &out_img, Image &insert_img, Image &target_img,
         int center_y_offset = geom_height/2 - inset_img_height/2;
         ci->geom.xOff(ci->geom.xOff() + center_x_offset);
         ci->geom.yOff(ci->geom.yOff() + center_y_offset);
-        inset.backgroundColor(insert_img.backgroundColor());
         inset.transparent(insert_img.backgroundColor());
-        inset.rotate(ci->rotation_degrees);
-        inset.backgroundColor(insert_img.backgroundColor());
-        inset.transparent(inset.backgroundColor());
         out_img.composite(inset,ci->geom,OverCompositeOp);
         rc = 0;
     } /* endfor */
