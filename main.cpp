@@ -86,7 +86,8 @@ static list<string> get_png_insertion_texts(png_struct *read_png,
     list<string> png_inserts;
     text_chunks = png_get_text(read_png, read_png_info, &text, &num_text);
     for (int i=0; i<text_chunks; ++i) {
-        if (text[i].key == string("insert_loc")) {
+        string key_string(text[i].key);
+        if (key_string.compare(0, sizeof("insert_loc_")-1, "insert_loc_") == 0) {
             png_inserts.push_back(text[i].text);
         } /* endif */
     } /* endfor */
