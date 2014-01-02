@@ -1,5 +1,4 @@
 #include <iostream>
-#include <png.h>
 #include <zlib.h>
 #include <errno.h>
 #include <getopt.h>
@@ -30,15 +29,22 @@ struct _geom_angle {
     } /* operator== */
 };
 
-static void make_insertions_version_info() {
-    cout << "   Compiled with libpng " << PNG_LIBPNG_VER_STRING <<
-            " using libpng " << png_libpng_ver << "." << endl;
-    cout << "   Compiled with zlib " << ZLIB_VERSION <<
-            " using zlib " << zlib_version << "." << endl;
-} /* make_insertions_version_info */
+static inline int string_to_int(string s)
+{
+    stringstream ss(s);
+    int x;
+    ss >> x;
+    return x;
+}
+
+static inline string int_to_string(int i)
+{
+    stringstream ss;
+    ss << i;
+    return ss.str();
+}
 
 static void usage(void) {
-    make_insertions_version_info();
     cout << " Usage is make_insertions -w geometry_spec -w geometry_spec... "
             "insert_image_file target_image_file output_image_file" << endl;
 } /* usage */
@@ -47,16 +53,26 @@ static void usage(void) {
 static int process_image(Image &out_img, Image &insert_img, Image &target_img,
                         list<struct _geom_angle> inserts) {
     int rc =-1;
+    string loc_keyword_string;
+    string loc_string;
+    int list_index = 1;
     out_img = target_img;
     cout << "Starting to process image" << endl;
     out_img = target_img;
     list<struct _geom_angle>::iterator ci;
-    for (ci=inserts.begin(); ci!=inserts.end(); ++ci) {
+    for (ci=inserts.begin(); ci!=inserts.end(); ++ci, ++list_index) {
         /* Take the current insert geometry item, size the logo image and insert it into the target */
         Image inset = insert_img;
         inset.backgroundColor(insert_img.backgroundColor());
         inset.rotate(ci->rotation_degrees);
         inset.zoom(ci->geom);
+        /* Set the insert tags in the image attributes */
+        loc_keyword_string = string("insert_loc_") + int_to_string(list_index);
+        loc_string = int_to_string(ci->geom.width()) + "x" + int_to_string(ci->geom.height());
+        loc_string += "+" + int_to_string(ci->geom.xOff()) + "+" + int_to_string(ci->geom.yOff());
+        if (ci->rotation_degrees != 0) {
+            loc_string += "/" + int_to_string(ci->rotation_degrees);
+        } /* endif */
         /* Calculate the center of the insert area and the center of the inserted image */
         /* Align the two centers */
         int inset_img_width = inset.columns();
@@ -69,75 +85,36 @@ static int process_image(Image &out_img, Image &insert_img, Image &target_img,
         ci->geom.yOff(ci->geom.yOff() + center_y_offset);
         inset.transparent(insert_img.backgroundColor());
         out_img.composite(inset,ci->geom,OverCompositeOp);
+        out_img.attribute(loc_keyword_string, loc_string);
         rc = 0;
     } /* endfor */
     cout << "Finished processing image" << endl;
     return rc;
 } /* process_image */
 
-/* Display insertion points in the input file */
-static list<string> get_png_insertion_texts(png_struct *read_png,
-                                            png_info_struct *read_png_info) {
-    string text_key;
-    string text_value;
-    int text_chunks;
-    int num_text;
-    png_text *text;
-    list<string> png_inserts;
-    text_chunks = png_get_text(read_png, read_png_info, &text, &num_text);
-    for (int i=0; i<text_chunks; ++i) {
-        string key_string(text[i].key);
-        if (key_string.compare(0, sizeof("insert_loc_")-1, "insert_loc_") == 0) {
-            png_inserts.push_back(text[i].text);
-        } /* endif */
-    } /* endfor */
-    return png_inserts;
-} /* get_png_insertion_texts */
-
-static bool is_png_file(FILE *fp, int *bytes_read) {
-    unsigned char sig_bytes[8];
-    int rc;
-    if (fread(sig_bytes, 1, 8, fp) != 8) {
-        rc = false;
-    } else {
-        if (png_sig_cmp(sig_bytes, 0, 8) == 0) {
-            rc = true;
-        } else {
-            rc = false;
-        } /* endif */
-        fseek(fp, 0, SEEK_SET); /* put the file back at the beginning */
-    } /* endif */
-    return rc;
-} /* is_png_file */
-
-static list<string> get_infile_inserts(string in_file) { /* Just for png files now */
-    png_struct *png;
-    png_info_struct *png_info; /* png info for chunks before the image */
-    png_info_struct *end_info; /* png info for chunks after the image */
-    FILE *fp;
+static list<string> get_infile_inserts(string in_file) {
     list<string> infile_insertions;
+    Image attr_img;
+    try {
+        attr_img.read(in_file);
+    } catch(Magick::WarningCoder &warning_) {
+        cout << "Warning is " << warning_.what() << endl;
+        attr_img.colorSpace(sRGBColorspace);
+    } catch(Exception &error_) {
+        cout << "Exception is " << error_.what() << endl;
+    } /* try catch */
 
-    if ((fp= fopen(in_file.c_str(), "rb")) != NULL) {
-        int bytes_read;
-        if (is_png_file(fp, &bytes_read)) {
-            png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-            if (png != NULL) {
-                png_info = png_create_info_struct(png);
-                if (png_info != NULL) {
-                    end_info = png_create_info_struct(png);
-                    if (end_info != NULL) {
-                        png_init_io(png, fp);
-                        png_read_png(png, png_info, PNG_TRANSFORM_IDENTITY, png_voidp_NULL);
-                        infile_insertions = get_png_insertion_texts(png, png_info);
-                        png_destroy_info_struct(png, &end_info);
-                    } /* endif */
-                    png_destroy_info_struct(png, &png_info);
-                } /* endif */
-                png_destroy_read_struct(&png, png_infopp_NULL, png_infopp_NULL);
-            } /* endif */
-        } /* endif */
-        fclose(fp);
-    } /* endif */
+    int list_index = 1;
+    string loc_keyword_string;
+    string returned_loc_string;
+    do {
+        loc_keyword_string = string("insert_loc_") + int_to_string(list_index);
+        returned_loc_string = attr_img.attribute(loc_keyword_string);
+        if (!returned_loc_string.empty()) {
+            infile_insertions.push_back(returned_loc_string);
+        }
+        ++list_index;
+    } while(!returned_loc_string.empty());
     return infile_insertions;
 } /* get_infile_inserts */
 
@@ -154,14 +131,6 @@ static int display_infile_inserts(string in_file) { /* Just for png files now */
     } /* endif */
     return rc;
 } /* display_infile_inserts */
-
-static inline int string_to_int(string s)
-{
-    stringstream ss(s);
-    int x;
-    ss >> x;
-    return x;
-}
 
 static const struct _geom_angle ins_loc_to_geom(string ins_str) {
     string geom_str;
