@@ -111,38 +111,25 @@ static bool is_png_file(FILE *fp, int *bytes_read) {
     return rc;
 } /* is_png_file */
 
-static int display_infile_inserts(string in_file) { /* Just for png files now */
+static list<string> get_infile_inserts(string in_file) { /* Just for png files now */
     png_struct *png;
     png_info_struct *png_info; /* png info for chunks before the image */
     png_info_struct *end_info; /* png info for chunks after the image */
     FILE *fp;
-    int rc =0;
+    list<string> infile_insertions;
 
-    if ((fp= fopen(in_file.c_str(), "rb")) == NULL) {
-        rc = -EIO;
-    } else {
+    if ((fp= fopen(in_file.c_str(), "rb")) != NULL) {
         int bytes_read;
-        if (!is_png_file(fp, &bytes_read)) {
-            rc = -EIO;
-        } else {
+        if (is_png_file(fp, &bytes_read)) {
             png = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
-            if (png == NULL) {
-                rc = -ENOMEM;
-            } else {
+            if (png != NULL) {
                 png_info = png_create_info_struct(png);
-                if (png_info == NULL) {
-                    rc = -ENOMEM;
-                } else {
+                if (png_info != NULL) {
                     end_info = png_create_info_struct(png);
-                    if (end_info == NULL) {
-                        rc = -ENOMEM;
-                    } else {
+                    if (end_info != NULL) {
                         png_init_io(png, fp);
                         png_read_png(png, png_info, PNG_TRANSFORM_IDENTITY, png_voidp_NULL);
-                        list<string> infile_insertions = get_png_insertion_texts(png, png_info);
-                        for (list<string>::iterator it=infile_insertions.begin(); it!=infile_insertions.end(); ++it) {
-                            cout << " insert location = \"" << *it << "\"" << endl;
-                        } /* endfor */
+                        infile_insertions = get_png_insertion_texts(png, png_info);
                         png_destroy_info_struct(png, &end_info);
                     } /* endif */
                     png_destroy_info_struct(png, &png_info);
@@ -152,8 +139,22 @@ static int display_infile_inserts(string in_file) { /* Just for png files now */
         } /* endif */
         fclose(fp);
     } /* endif */
+    return infile_insertions;
+} /* get_infile_inserts */
+
+static int display_infile_inserts(string in_file) { /* Just for png files now */
+    int rc = 0;
+
+    list<string> infile_insertions = get_infile_inserts(in_file);
+    if (infile_insertions.empty()) {
+        rc = -EIO;
+    } else {
+        for (list<string>::iterator it=infile_insertions.begin(); it!=infile_insertions.end(); ++it) {
+            cout << " insert location = \"" << *it << "\"" << endl;
+        } /* endfor */
+    } /* endif */
     return rc;
-} /* process_png_inserts */
+} /* display_infile_inserts */
 
 static inline int string_to_int(string s)
 {
@@ -163,6 +164,33 @@ static inline int string_to_int(string s)
     return x;
 }
 
+static const struct _geom_angle ins_loc_to_geom(string ins_str) {
+    string geom_str;
+    string rotate_str;
+    /* split the string at the optional '/' to isolate the geometry and rotation */
+    string rotate_delim = "/";
+    int delim_pos = ins_str.find(rotate_delim);
+    double rotate_angle = 0;
+
+    if (delim_pos > 0) {
+        geom_str = ins_str.substr(0,delim_pos);
+        rotate_str = ins_str.erase(0,delim_pos+rotate_delim.length());
+        rotate_angle = string_to_int(rotate_str);
+    } else {
+        geom_str = ins_str;
+    } /* endif */
+    Geometry ins_geom;
+    try {
+        ins_geom = Geometry(geom_str);
+    } catch (Exception &error_){
+        cout << "Failed to create an insertion geometry from \"" << geom_str << endl;
+        cout << " Error is " << error_.what() << endl;
+        ins_geom = Geometry(0,0,0,0);
+    } /* catch */
+    struct _geom_angle const new_insert_spec = { ins_geom, rotate_angle };
+    return new_insert_spec;
+} /* ins_loc_to_geom */
+
 /* This program takes 3 filename arguments and multiple -w insertion spec strings */
 /* Positional arguments are inserted_image_file, target_image_file, output_image_file */
 int main(int argc, char* argv[]) {
@@ -170,8 +198,10 @@ int main(int argc, char* argv[]) {
     int rc = 0;
     int opt = 0;
     list<struct _geom_angle> insert_geoms;
+    list<string> cmd_insert_strs;
+    list<string> template_inserts;
     enum process_options {display_insertions, do_insertions, do_nothing};
-    enum process_options p_opt = do_nothing;
+    enum process_options p_opt = do_insertions;
     string insert_img_filename;
     string target_img_filename;
     string output_img_filename;
@@ -199,45 +229,9 @@ int main(int argc, char* argv[]) {
             case 'd':
                 p_opt= display_insertions;
                 break;
-            case 'w': {
+            case 'w':
                 /* add the option to the list of insertion points */
-                /* split the string at the optional '/' to isolate the geometry and rotation */
-                string cmd_ins_loc = string(optarg);
-                string geom_str;
-                string rotate_str;
-                string rotate_delim = "/";
-                int delim_pos = cmd_ins_loc.find(rotate_delim);
-                double rotate_angle = 0;
-
-                if (delim_pos > 0) {
-                    geom_str = cmd_ins_loc.substr(0,delim_pos);
-                    rotate_str = cmd_ins_loc.erase(0,delim_pos+rotate_delim.length());
-                    rotate_angle = string_to_int(rotate_str);
-                } else {
-                    geom_str = cmd_ins_loc;
-                } /* endif */
-                Geometry ins_geom;
-                try {
-                    ins_geom = Geometry(geom_str);
-                } catch (Exception &error_){
-                    cout << "Failed to create an insertion geometry from \"" << geom_str << endl;
-                    cout << " Error is " << error_.what() << endl;
-                    rc = -EINVAL;
-                } /* catch */
-                struct _geom_angle const new_insert_spec = { ins_geom, rotate_angle };
-                ci = find(insert_geoms.begin(), insert_geoms.end(), new_insert_spec);
-
-                if (ci != insert_geoms.end()) {
-                    cout << " This insert item \"" << geom_str << "/" << rotate_str << "\" is a duplicate, check your list of -w arguments.." << endl;
-                    p_opt = do_nothing;
-                    exit(-EINVAL);
-                } else {
-                    insert_geoms.push_back(new_insert_spec);
-                }
-
-                insert_geoms.push_back(new_insert_spec);
-                p_opt = do_insertions;
-                }
+                cmd_insert_strs.push_back(optarg);
                 break;
             case 'i':
                 insert_img_filename = string(optarg);
@@ -253,14 +247,42 @@ int main(int argc, char* argv[]) {
                 return -1;
         } /* endswitch */
     } /* endwhile */
-    insert_geoms.sort();
-    insert_geoms.unique();
 
     if (((argc-optind) == 3) && (p_opt == do_insertions)) {
         rc = 0;
         insert_img_filename = argv[optind];
         target_img_filename = argv[optind+1];
         output_img_filename = argv[optind+2];
+        if (!cmd_insert_strs.empty()) {
+            template_inserts = cmd_insert_strs;
+        } else {
+            /* See if there are insert locations in the template file */
+            cout << " Looking for insert items in target file " << endl;
+            template_inserts = get_infile_inserts(target_img_filename);
+        } /* endif */
+        list<string>::iterator ti;
+        cout << " list from target file is " << template_inserts.size() << endl;
+        for (ti=template_inserts.begin(); ti!=template_inserts.end(); ++ti) {
+            list<struct _geom_angle>::iterator ci;
+            struct _geom_angle new_insert_spec = ins_loc_to_geom(*ti);
+            if (new_insert_spec.geom == Geometry(0,0,0,0)) { /* width and height of 0 mean no insertion */
+                cout << " This insert item from the target file \"" << *ti << "\" cannot be used for insertion, should be widthxheight+xoffset+yoffset/rotation_angle" << endl;
+                p_opt = do_nothing;
+                exit(-EINVAL);
+            } else {
+                ci = find(insert_geoms.begin(), insert_geoms.end(), new_insert_spec);
+                if (ci != insert_geoms.end()) {
+                    cout << " This insert item \"" << *ti << "\" is a duplicate, check the list of embedded inserts using the -d option." << endl;
+                    p_opt = do_nothing;
+                    exit(-EINVAL);
+                } else {
+                    insert_geoms.push_back(new_insert_spec);
+                    p_opt = do_insertions;
+                } /* endif */
+            } /* endif */
+        } /* endfor */
+        insert_geoms.sort();
+        insert_geoms.unique();
         try {
             insert_img.read(insert_img_filename);
         } catch(Magick::WarningCoder &warning_) {
