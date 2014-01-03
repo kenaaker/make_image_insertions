@@ -4,7 +4,7 @@ SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -std=c++11 -Wall -DMAGICKCORE_HDRI_EN
 aux_source_directory(. SRC_LIST)
 find_package(PNG REQUIRED)
 message(STATUS "LibPNG package was found with include dir: '${PNG_INCLUDE_DIRS}'")
-find_package(GraphicsMagick COMPONENTS GraphicsMagick++)
+find_package(GraphicsMagick COMPONENTS GraphicsMagick++ GraphicsMagick)
 include_directories(${GraphicsMagick_INCLUDE_DIRS})
 add_executable(${PROJECT_NAME} ${SRC_LIST})
 target_link_libraries(${PROJECT_NAME} ${PNG_LIBRARIES})

@@ -44,9 +44,26 @@ static inline string int_to_string(int i)
     return ss.str();
 }
 
+// This is my override version of attribute to erase the previous value kda.
+// Access/Update a named image attribute
+void Magick::Image::attribute(const std::string name_,
+                              const std::string value_) {
+  modifyImage();
+  if (value_.empty()) {
+      SetImageAttribute(image(), name_.c_str(), NULL);
+  } else {
+      SetImageAttribute(image(), name_.c_str(), value_.c_str());
+  } /* endif */
+}
+
+
 static void usage(void) {
-    cout << " Usage is make_insertions -w geometry_spec -w geometry_spec... "
-            "insert_image_file target_image_file output_image_file" << endl;
+    cout << " Usage is \tmake_image_insertions -w geometry_spec -w geometry_spec... "
+            "insert_image_file template_image_file output_image_file" << endl;
+    cout << " Or \t\tmake_image_insertions -w geometry_spec -w geometry_spec... "
+            "-i insert_image_file -t template_image_file -o output_image_file" << endl;
+    cout << " Or to display template file insertion points" << endl <<
+            "\t\tmake_image_insertions -d template_image_file" << endl;
 } /* usage */
 
 /* Put insertions into target image. inserts is assumed sorted and unique */
@@ -85,6 +102,9 @@ static int process_image(Image &out_img, Image &insert_img, Image &target_img,
         ci->geom.yOff(ci->geom.yOff() + center_y_offset);
         inset.transparent(insert_img.backgroundColor());
         out_img.composite(inset,ci->geom,OverCompositeOp);
+        if (!out_img.attribute(loc_keyword_string).empty()) {
+            out_img.attribute(loc_keyword_string, ""); /* Delete old value */
+        }
         out_img.attribute(loc_keyword_string, loc_string);
         rc = 0;
     } /* endfor */
@@ -216,20 +236,32 @@ int main(int argc, char* argv[]) {
         } /* endswitch */
     } /* endwhile */
 
-    if (((argc-optind) == 3) && (p_opt == do_insertions)) {
+    if ((((argc-optind) == 3) ||
+         ((!insert_img_filename.empty() && !target_img_filename.empty() && !output_img_filename.empty())))
+            && (p_opt == do_insertions)) {
         rc = 0;
-        insert_img_filename = argv[optind];
-        target_img_filename = argv[optind+1];
-        output_img_filename = argv[optind+2];
+        if (insert_img_filename.empty()) {
+            insert_img_filename = argv[optind];
+        } /* endif */
+        if (target_img_filename.empty()) {
+            target_img_filename = argv[optind+1];
+        } /* endif */
+        if (output_img_filename.empty()) {
+            output_img_filename = argv[optind+2];
+        } /* endif */
         if (!cmd_insert_strs.empty()) {
             template_inserts = cmd_insert_strs;
         } else {
             /* See if there are insert locations in the template file */
-            cout << " Looking for insert items in target file " << endl;
             template_inserts = get_infile_inserts(target_img_filename);
+            if (template_inserts.empty()) {
+                cout << "No image insertion points were supplied, stopping now." << endl;
+                exit(-EINVAL);
+            } else {
+                cout << "Using insertion points from template file \"" << target_img_filename << "\"." << endl;
+            }
         } /* endif */
         list<string>::iterator ti;
-        cout << " list from target file is " << template_inserts.size() << endl;
         for (ti=template_inserts.begin(); ti!=template_inserts.end(); ++ti) {
             list<struct _geom_angle>::iterator ci;
             struct _geom_angle new_insert_spec = ins_loc_to_geom(*ti);
