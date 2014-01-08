@@ -180,6 +180,7 @@ static const struct _geom_angle ins_loc_to_geom(string ins_str) {
 } /* ins_loc_to_geom */
 
 /* This program takes 3 filename arguments and multiple -w insertion spec strings */
+/* Or optionally, a filename and a -d option to display the insertion points in an image file */
 /* Positional arguments are inserted_image_file, target_image_file, output_image_file */
 int main(int argc, char* argv[]) {
 
