@@ -3,7 +3,7 @@
 #include <errno.h>
 #include <getopt.h>
 #include <list>
-#include <regex.h>
+#include <regex>
 #include <algorithm>
 #include <sstream>
 #include <Magick++.h>
